@@ -653,8 +653,11 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
     def set_tuned_lens(self, tuned_lens):
         self.model.tuned_lens = tuned_lens
     
-    def set_early_exit_mode(self, early_exit: bool = True):
-        self.model.early_exit = early_exit
+    def early_exit(self):
+        self.model.early_exit = True
+    
+    def full_inference(self):
+        self.model.early_exit = False
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
