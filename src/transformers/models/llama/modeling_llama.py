@@ -444,6 +444,10 @@ class LlamaModel(LlamaPreTrainedModel):
         self.layers = nn.ModuleList([LlamaDecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+        self.early_exit = False
+        self.exit_layer = None
+        self.tuned_lens = None
+
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
@@ -490,8 +494,6 @@ class LlamaModel(LlamaPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        tuned_lens = None,
-        stop_layer = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -593,13 +595,14 @@ class LlamaModel(LlamaPreTrainedModel):
                 all_self_attns += (layer_outputs[1],)
             
             # early exit
-            if stop_layer is not None and idx == stop_layer:
-                assert tuned_lens is not None, "using stop_layer as a parameter requires a tuned lens"
-                # residual connection with translator
-                hidden_states = hidden_states + tuned_lens.layer_translators[stop_layer](hidden_states)
-                break
+            if self.exit_layer is not None and idx == self.exit_layer:
+                if self.early_exit:
+                    assert self.tuned_lens is not None, "early exiting requires a tuned lens"
+                    # residual connection with translator
+                    hidden_states = hidden_states + self.tuned_lens.layer_translators[self.exit_layer](hidden_states)
+                    break
 
-        # self.norm is the same as tuned_lens.unembed.final_norm
+        # self.norm is the same as self.tuned_lens.unembed.final_norm
         hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
@@ -643,6 +646,15 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
 
     def get_decoder(self):
         return self.model
+    
+    def set_exit_layer(self, exit_layer: int):
+        self.model.exit_layer = exit_layer
+    
+    def set_tuned_lens(self, tuned_lens):
+        self.model.tuned_lens = tuned_lens
+    
+    def set_early_exit_mode(self, early_exit: bool = True):
+        self.model.early_exit = early_exit
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
@@ -658,8 +670,6 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        stop_layer = None,
-        tuned_lens = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -703,13 +713,11 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            stop_layer=stop_layer,
-            tuned_lens=tuned_lens,
         )
 
         hidden_states = outputs[0]
         # note: the tuned lens unembedding should be the same as the model's unembedding
-        # assert(torch.allclose(self.lm_head.weight, tuned_lens.unembed.unembedding.weight)), "mismatched unembedding matrices"
+        # assert(torch.allclose(self.lm_head.weight, self.model.tuned_lens.unembed.unembedding.weight)), "mismatched unembedding matrices"
         logits = self.lm_head(hidden_states)
 
         loss = None
@@ -738,7 +746,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, stop_layer=None, tuned_lens=None, **kwargs
+        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
     ):
         if past_key_values:
             input_ids = input_ids[:, -1:]
@@ -763,8 +771,6 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
-                "stop_layer": stop_layer,
-                "tuned_lens": tuned_lens,
             }
         )
         return model_inputs
