@@ -596,7 +596,7 @@ class LlamaModel(LlamaPreTrainedModel):
                 break
 
         if stop_layer is not None and tuned_lens is not None:
-            hidden_states = tuned_lens.layer_translators[stop_layer](hidden_states)
+            hidden_states = hidden_states + tuned_lens.layer_translators[stop_layer](hidden_states)
 
         # self.norm is the same as tuned_lens.unembed.final_norm
         hidden_states = self.norm(hidden_states)
