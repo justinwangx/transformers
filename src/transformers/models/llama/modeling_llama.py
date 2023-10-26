@@ -597,9 +597,9 @@ class LlamaModel(LlamaPreTrainedModel):
 
         if stop_layer is not None and tuned_lens is not None:
             hidden_states = tuned_lens.layer_translators[stop_layer](hidden_states)
-            hidden_states = tuned_lens.unembed.final_norm(hidden_states)
-        else:
-            hidden_states = self.norm(hidden_states)
+
+        # self.norm is the same as tuned_lens.unembed.final_norm
+        hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
@@ -707,10 +707,9 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         )
 
         hidden_states = outputs[0]
-        if stop_layer is not None and tuned_lens is not None:
-            logits = tuned_lens.unembed.unembedding(hidden_states)
-        else:
-            logits = self.lm_head(hidden_states)
+        # note: the tuned lens unembedding should be the same as the model's unembedding
+        # assert(torch.allclose(self.lm_head.weight, tuned_lens.unembed.unembedding.weight)), "mismatched unembedding matrices"
+        logits = self.lm_head(hidden_states)
 
         loss = None
         if labels is not None:
