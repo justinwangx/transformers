@@ -592,11 +592,12 @@ class LlamaModel(LlamaPreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
             
+            # early exit
             if stop_layer is not None and idx == stop_layer:
+                assert tuned_lens is not None, "using stop_layer as a parameter requires a tuned lens"
+                # residual connection with translator
+                hidden_states = hidden_states + tuned_lens.layer_translators[stop_layer](hidden_states)
                 break
-
-        if stop_layer is not None and tuned_lens is not None:
-            hidden_states = hidden_states + tuned_lens.layer_translators[stop_layer](hidden_states)
 
         # self.norm is the same as tuned_lens.unembed.final_norm
         hidden_states = self.norm(hidden_states)
